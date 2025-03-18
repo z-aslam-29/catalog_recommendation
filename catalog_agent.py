@@ -302,7 +302,7 @@ def main():
     st.title("Supplier Analyzer")
     
     # Input for CSV file path
-    default_path = "C:\\Users\\shaik\\Downloads\\Catalogs2.csv"
+    default_path = r"Catalogs2.csv"
     file_path = st.text_input("Enter the path to the CSV file:", default_path)
     
     if not file_path:
