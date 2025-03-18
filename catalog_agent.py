@@ -3,9 +3,13 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import nltk
+from nltk.stem.porter import PorterStemmer
 import warnings
 import os
 import re
+
+nltk.download('punkt')
 
 # Suppress warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -73,28 +77,35 @@ def preprocess_data(df):
     
     return df
 
-# Find similar products using TF-IDF + Cosine Similarity
+# Define the stemmed vectorizer first
+class StemmedTfidfVectorizer(TfidfVectorizer):
+    def build_analyzer(self):
+        analyzer = super(StemmedTfidfVectorizer, self).build_analyzer()
+        stemmer = PorterStemmer()
+        return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
+
 def find_similar_products(df, query, top_n=5):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
+    With stemming to handle word variations like singular/plural forms.
     """
     # Preprocess the dataframe columns for search
     df['search_text'] = df['product_name'] + ' ' + df['description']
     
     # Clean the query and product texts
-    # Remove special regex handling for quotes and other special characters
     clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
     
     # Get unique product texts
     product_texts = df['search_text'].tolist()
     product_names = df['product_name'].tolist()
     
-    # Create and fit the TF-IDF vectorizer with minimal preprocessing
-    # Allow quotes and special characters to be preserved
-    vectorizer = TfidfVectorizer(
+    # Use the stemming vectorizer
+    vectorizer = StemmedTfidfVectorizer(
         analyzer='word',
-        token_pattern=r'(?u)\b\w+[\'"\-\w]*\b|\d+[\'"\"]',  # Modified pattern to match words with quotes
-        ngram_range=(1, 2)  # Consider single words and pairs to catch phrases like "bar 1""
+        token_pattern=r'(?u)\b\w+[\'"\-\w]*\b|\d+[\'"\"]',
+        ngram_range=(1, 2),
+        stop_words='english',
+        lowercase=True
     )
     
     tfidf_matrix = vectorizer.fit_transform(product_texts)
@@ -123,7 +134,8 @@ def find_similar_products(df, query, top_n=5):
     
     # If no results found using TF-IDF, try direct substring match as fallback
     if not results:
-        inch_pattern = r'(\d+)["\'"]'  # Pattern to match numbers followed by inch symbols
+        # First try inch pattern
+        inch_pattern = r'(\d+)["\'"]'
         query_has_inches = re.search(inch_pattern, query)
         
         if query_has_inches:
@@ -133,7 +145,27 @@ def find_similar_products(df, query, top_n=5):
             # Look for products containing this inch value with quotes
             for i, name in enumerate(product_names):
                 if f"{inch_value}\"" in name or f"{inch_value} inch" in name.lower():
-                    results.append((name, 0.5))  # Assign a medium score
+                    results.append((name, 0.5))
+                    if len(results) >= top_n:
+                        break
+        
+        # Then try simple substring match for singular/plural forms
+        else:
+            query_lower = query.lower()
+            # Check for singular/plural variations
+            if query_lower.endswith('s'):
+                singular_form = query_lower[:-1]
+                search_forms = [query_lower, singular_form]
+            else:
+                singular_form = query_lower
+                plural_form = query_lower + 's'
+                search_forms = [query_lower, plural_form]
+            
+            for i, name in enumerate(product_names):
+                name_lower = name.lower()
+                # Check for both singular and plural forms
+                if any(form in name_lower for form in search_forms):
+                    results.append((name, 0.5))
                     if len(results) >= top_n:
                         break
     
