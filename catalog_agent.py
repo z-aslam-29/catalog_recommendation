@@ -5,6 +5,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import warnings
 import os
+import re
 
 # Suppress warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
