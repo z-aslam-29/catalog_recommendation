@@ -77,34 +77,66 @@ def find_similar_products(df, query, top_n=5):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
     """
+    # Preprocess the dataframe columns for search
     df['search_text'] = df['product_name'] + ' ' + df['description']
     
-    product_texts = df['search_text'].unique()
-    product_names = df['product_name'].unique()
+    # Clean the query and product texts
+    # Remove special regex handling for quotes and other special characters
+    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
     
-    vectorizer = TfidfVectorizer()
+    # Get unique product texts
+    product_texts = df['search_text'].tolist()
+    product_names = df['product_name'].tolist()
+    
+    # Create and fit the TF-IDF vectorizer with minimal preprocessing
+    # Allow quotes and special characters to be preserved
+    vectorizer = TfidfVectorizer(
+        analyzer='word',
+        token_pattern=r'(?u)\b\w+[\'"\-\w]*\b|\d+[\'"\"]',  # Modified pattern to match words with quotes
+        ngram_range=(1, 2)  # Consider single words and pairs to catch phrases like "bar 1""
+    )
+    
     tfidf_matrix = vectorizer.fit_transform(product_texts)
     
-    query_vector = vectorizer.transform([query])
+    # Transform the query using the same vectorizer
+    query_vector = vectorizer.transform([clean_query])
     cosine_similarities = cosine_similarity(query_vector, tfidf_matrix).flatten()
     
     # Get indices sorted by similarity score in descending order
     sorted_indices = np.argsort(cosine_similarities)[::-1]
     
-    # Filter out products with similarity score 0.00
-    matches = [(product_texts[i], cosine_similarities[i]) for i in sorted_indices if cosine_similarities[i] > 0]
+    # Create a list of tuples (product_name, similarity_score)
+    results = []
+    seen_products = set()  # To avoid duplicates
     
-    # Take at most 'top_n' results but return only available ones
-    matches = matches[:min(top_n, len(matches))]
-
-    product_matches = []
-    for text, score in matches:
-        for name in product_names:
-            if name in text:
-                product_matches.append((name, score))
+    for i in sorted_indices:
+        if cosine_similarities[i] > 0:
+            product_name = product_names[i]
+            if product_name not in seen_products:
+                results.append((product_name, cosine_similarities[i]))
+                seen_products.add(product_name)
+            
+            # Stop when we have enough results
+            if len(results) >= top_n:
                 break
     
-    return product_matches
+    # If no results found using TF-IDF, try direct substring match as fallback
+    if not results:
+        inch_pattern = r'(\d+)["\'"]'  # Pattern to match numbers followed by inch symbols
+        query_has_inches = re.search(inch_pattern, query)
+        
+        if query_has_inches:
+            # Extract the numeric part
+            inch_value = query_has_inches.group(1)
+            
+            # Look for products containing this inch value with quotes
+            for i, name in enumerate(product_names):
+                if f"{inch_value}\"" in name or f"{inch_value} inch" in name.lower():
+                    results.append((name, 0.5))  # Assign a medium score
+                    if len(results) >= top_n:
+                        break
+    
+    return results
 
 
 # Find and analyze suppliers
