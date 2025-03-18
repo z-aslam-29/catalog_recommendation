@@ -77,32 +77,26 @@ def find_similar_products(df, query, top_n=5):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
     """
-    # Combine product name and description for better matching
     df['search_text'] = df['product_name'] + ' ' + df['description']
     
-    # Get unique product descriptions
     product_texts = df['search_text'].unique()
     product_names = df['product_name'].unique()
     
-    # Initialize TF-IDF Vectorizer
     vectorizer = TfidfVectorizer()
-    
-    # Fit and transform the product texts
     tfidf_matrix = vectorizer.fit_transform(product_texts)
     
-    # Transform the query
     query_vector = vectorizer.transform([query])
-    
-    # Calculate cosine similarity between query and product descriptions
     cosine_similarities = cosine_similarity(query_vector, tfidf_matrix).flatten()
     
-    # Get the indices of the top N most similar products
-    top_indices = cosine_similarities.argsort()[-top_n:][::-1]
+    # Get indices sorted by similarity score in descending order
+    sorted_indices = np.argsort(cosine_similarities)[::-1]
     
-    # Return the matched products and their similarity scores
-    matches = [(product_texts[i], cosine_similarities[i]) for i in top_indices]
+    # Filter out products with similarity score 0.00
+    matches = [(product_texts[i], cosine_similarities[i]) for i in sorted_indices if cosine_similarities[i] > 0]
     
-    # Map back to product names
+    # Take at most 'top_n' results but return only available ones
+    matches = matches[:min(top_n, len(matches))]
+
     product_matches = []
     for text, score in matches:
         for name in product_names:
@@ -111,6 +105,7 @@ def find_similar_products(df, query, top_n=5):
                 break
     
     return product_matches
+
 
 # Find and analyze suppliers
 def find_and_analyze_suppliers(df, product_name, top_n=5):
