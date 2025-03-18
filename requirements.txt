@@ -1,4 +1,3 @@
 scikit-learn
 re
-pandas
-numpy
+
