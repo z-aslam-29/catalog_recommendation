@@ -491,6 +491,10 @@ def main():
     # Sidebar for search
     st.header("Search Products")
     search_query = st.text_input("Enter search terms:")
+
+    # Reset selected product if a new search query is entered
+    if search_query and 'selected_product' in st.session_state:
+        del st.session_state.selected_product
     
     if search_query:
         # Find similar products
