@@ -359,18 +359,16 @@ def generate_supplier_insights(supplier_data, all_suppliers_data):
 
 # Set up the Streamlit app
 def main():
-    st.title("Supplier Analyzer")
+    st.title("Catalog Recommendation Agent")
     
     # Input for CSV file path
     default_path = r"Catalogs2.csv"
-    file_path = st.text_input("Enter the path to the CSV file:", default_path)
+    #file_path = st.text_input("Enter the path to the CSV file:", default_path)
     
-    if not file_path:
-        st.warning("Please enter a file path.")
-        return
+    
     
     # Load and preprocess data
-    df = load_data(file_path)
+    df = load_data(default_path)
     if df.empty:
         st.error("Failed to load data. Please check your file path.")
         return
@@ -378,8 +376,8 @@ def main():
     processed_df = preprocess_data(df)
     
     # Sidebar for search
-    st.sidebar.header("Search Products")
-    search_query = st.sidebar.text_input("Enter search terms:")
+    st.header("Search Products")
+    search_query = st.text_input("Enter search terms:")
     
     if search_query:
         # Find similar products
