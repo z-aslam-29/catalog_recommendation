@@ -9,7 +9,7 @@ import nltk
 import os
 import re
 
-#nltk.download('punkt')
+nltk.download('punkt')
 
 # Suppress warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
