@@ -100,16 +100,14 @@ def find_similar_products(df, query, top_n=5):
     # Clean the query and product texts
     clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
     
-    # NEW: Handle singular/plural forms at the beginning
+    # Handle singular/plural forms
     query_lower = clean_query.lower()
     if query_lower.endswith('s'):
-        singular_form = query_lower[:-1]
-        # Create an expanded query that includes both forms
-        expanded_query = f"{query_lower} {singular_form}"
+        singular_form = query_lower[:-1]  # Remove 's' for singular form
+        expanded_query = f"{query_lower} {singular_form}"  # Include both forms
     else:
-        plural_form = query_lower + 's'
-        # Create an expanded query that includes both forms
-        expanded_query = f"{query_lower} {plural_form}"
+        plural_form = query_lower + 's'  # Add 's' for plural form
+        expanded_query = f"{query_lower} {plural_form}"  # Include both forms
     
     # Use the expanded query for processing
     clean_query = expanded_query
@@ -270,12 +268,11 @@ def find_similar_products(df, query, top_n=5):
                             break
         
         # Then try simple substring match for individual words
-        elif not results and query_length > 2:
+        elif not results:
             for i, name in enumerate(product_names):
                 name_lower = name.lower()
-                # Check if at least half of the query terms appear in the name
-                matches = sum(1 for term in query_terms if term in name_lower)
-                if matches >= query_length / 2:
+                # Check if any of the query terms appear in the name
+                if any(term in name_lower for term in query_terms):
                     if name not in seen_products:
                         results.append((name, 0.4))
                         seen_products.add(name)
