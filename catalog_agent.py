@@ -3,13 +3,13 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import nltk
 from nltk.stem.porter import PorterStemmer
 import warnings
+import nltk
 import os
 import re
 
-nltk.download('punkt')
+#nltk.download('punkt')
 
 # Suppress warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -87,23 +87,95 @@ class StemmedTfidfVectorizer(TfidfVectorizer):
 def find_similar_products(df, query, top_n=5):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
-    With stemming to handle word variations like singular/plural forms.
     """
-    # Preprocess the dataframe columns for search
-    df['search_text'] = df['product_name'] + ' ' + df['description']
+
+    # Filter out rows with empty product_name before processing
+    df = df[df['product_name'].notna() & (df['product_name'] != '')]
+    
+    # Preprocess the dataframe columns for search - handle empty product_name
+    df['search_text'] = df.apply(lambda row: 
+                                 (row['product_name'] if pd.notna(row['product_name']) else '') + ' ' + 
+                                 (row['description'] if pd.notna(row['description']) else '') ,
+                                 axis=1)
     
     # Clean the query and product texts
     clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
     
     # Get unique product texts
     product_texts = df['search_text'].tolist()
-    product_names = df['product_name'].tolist()
     
-    # Use the stemming vectorizer
+    # Create a combined product name field that uses service_name as fallback
+    df['display_name'] = df.apply(lambda row: 
+                                 row['product_name'] if pd.notna(row['product_name']) 
+                                 else 'Unknown', axis=1)
+    product_names = df['display_name'].tolist()
+    
+    # Extract key terms from query for exact phrase matching
+    query_terms = clean_query.strip().lower().split()
+    query_length = len(query_terms)
+    
+    # First try to match the exact phrase with higher priority
+    exact_matches = []
+    partial_phrase_matches = []
+    
+    # Look for exact phrase matches and consecutive word matches first
+    for i, text in enumerate(product_texts):
+        text_lower = text.lower()
+        product_name_lower = product_names[i].lower()
+        
+        # Skip entries without a product name or service name
+        if product_name_lower == 'unknown':
+            continue
+            
+        # Check for exact phrase match in product name (highest priority)
+        if clean_query.lower() in product_name_lower:
+            exact_matches.append((product_names[i], 1.0))
+            continue
+            
+        # Check for exact phrase match in search text (high priority)
+        if clean_query.lower() in text_lower:
+            exact_matches.append((product_names[i], 0.9))
+            continue
+            
+        # Check for all terms appearing in the product name, even if not consecutive
+        if query_length > 1 and all(term in product_name_lower for term in query_terms):
+            partial_phrase_matches.append((product_names[i], 0.8))
+            continue
+            
+        # NEW: Check for most terms appearing in the product name (more flexible)
+        if query_length > 2:  # Only for queries with 3+ words
+            matches = sum(1 for term in query_terms if term in product_name_lower)
+            if matches >= query_length - 1:  # Allow missing one term
+                partial_phrase_matches.append((product_names[i], 0.7))
+                continue
+                
+        # NEW: Check for most terms appearing in the search text
+        if query_length > 2:  # Only for queries with 3+ words
+            matches = sum(1 for term in query_terms if term in text_lower)
+            if matches >= query_length - 1:  # Allow missing one term
+                partial_phrase_matches.append((product_names[i], 0.6))
+                continue
+    
+    # If we have exact or good partial matches, return those
+    if exact_matches or partial_phrase_matches:
+        # Remove duplicates while preserving order
+        unique_results = []
+        seen_products = set()
+        for product, score in exact_matches + partial_phrase_matches:
+            if product not in seen_products:
+                unique_results.append((product, score))
+                seen_products.add(product)
+                
+                if len(unique_results) >= top_n:
+                    break
+                    
+        return unique_results[:top_n]
+    
+    # Fall back to TF-IDF + semantic context scoring if no exact matches
     vectorizer = StemmedTfidfVectorizer(
         analyzer='word',
         token_pattern=r'(?u)\b\w+[\'"\-\w]*\b|\d+[\'"\"]',
-        ngram_range=(1, 2),
+        ngram_range=(1, 2),  # Consider both unigrams and bigrams
         stop_words='english',
         lowercase=True
     )
@@ -121,10 +193,40 @@ def find_similar_products(df, query, top_n=5):
     results = []
     seen_products = set()  # To avoid duplicates
     
+    # MODIFIED: Relaxed threshold for longer queries
+    min_similarity_threshold = 0.2 if query_length <= 2 else 0.15
+    
+    # Add semantic context filtering to prevent partial word matches from irrelevant categories
     for i in sorted_indices:
-        if cosine_similarities[i] > 0:
+        if cosine_similarities[i] > min_similarity_threshold:  # Lower threshold for longer queries
             product_name = product_names[i]
-            if product_name not in seen_products:
+            
+            # Skip if we've already seen this product
+            if product_name in seen_products:
+                continue
+                
+            product_text = product_texts[i].lower()
+            
+            if query_length > 1:
+                # Enhanced check for multi-word queries to avoid cross-category matches
+                query_match_count = sum(1 for term in query_terms if term in product_text)
+                
+                # MODIFIED: Relaxed matching criteria for longer queries
+                min_match_ratio = 0.7 if query_length <= 2 else 0.6
+                
+                # Only include if most query terms appear, or the similarity is very high
+                if query_match_count / query_length >= min_match_ratio or cosine_similarities[i] > 0.5:
+                    # Check if the product name or description suggests a different category
+                    if not all(term in product_text for term in query_terms) and cosine_similarities[i] < 0.6:
+                        # Apply a penalty to similarity score
+                        adjusted_score = cosine_similarities[i] * 0.7  # Less penalty
+                    else:
+                        adjusted_score = cosine_similarities[i]
+                    
+                    results.append((product_name, adjusted_score))
+                    seen_products.add(product_name)
+            else:
+                # For single word queries, still apply some filtering to avoid cross-category matches
                 results.append((product_name, cosine_similarities[i]))
                 seen_products.add(product_name)
             
@@ -132,7 +234,7 @@ def find_similar_products(df, query, top_n=5):
             if len(results) >= top_n:
                 break
     
-    # If no results found using TF-IDF, try direct substring match as fallback
+    # If still no results found, use direct substring match as fallback
     if not results:
         # First try inch pattern
         inch_pattern = r'(\d+)["\'"]'
@@ -145,9 +247,11 @@ def find_similar_products(df, query, top_n=5):
             # Look for products containing this inch value with quotes
             for i, name in enumerate(product_names):
                 if f"{inch_value}\"" in name or f"{inch_value} inch" in name.lower():
-                    results.append((name, 0.5))
-                    if len(results) >= top_n:
-                        break
+                    if name not in seen_products:
+                        results.append((name, 0.5))
+                        seen_products.add(name)
+                        if len(results) >= top_n:
+                            break
         
         # Then try simple substring match for singular/plural forms
         else:
@@ -165,9 +269,24 @@ def find_similar_products(df, query, top_n=5):
                 name_lower = name.lower()
                 # Check for both singular and plural forms
                 if any(form in name_lower for form in search_forms):
-                    results.append((name, 0.5))
-                    if len(results) >= top_n:
-                        break
+                    if name not in seen_products:
+                        results.append((name, 0.5))
+                        seen_products.add(name)
+                        if len(results) >= top_n:
+                            break
+                            
+            # NEW: If still no results, try matching individual words
+            if not results and query_length > 2:
+                for i, name in enumerate(product_names):
+                    name_lower = name.lower()
+                    # Check if at least half of the query terms appear in the name
+                    matches = sum(1 for term in query_terms if term in name_lower)
+                    if matches >= query_length / 2:
+                        if name not in seen_products:
+                            results.append((name, 0.4))
+                            seen_products.add(name)
+                            if len(results) >= top_n:
+                                break
     
     return results
 
@@ -234,7 +353,7 @@ def find_and_analyze_suppliers(df, product_name, top_n=5):
             'Product Count': product_count,
             'Price Consistency': price_consistency * 100,  # Convert to percentage
             'Delivery Terms': delivery_terms,
-            'Discount': group['discount_value'].mean() * 100  # Convert to percentage
+            'Discount(%)': group['discount_value'].mean() * 100  # Convert to percentage
         })
     
     # Convert to DataFrame
@@ -269,9 +388,9 @@ def find_and_analyze_suppliers(df, product_name, top_n=5):
         agg_df['Consistency Score'] = agg_df['Price Consistency'] / 100  # Convert back to 0-1 scale
         
         # Discount score - higher is better
-        max_discount = agg_df['Discount'].max()
+        max_discount = agg_df['Discount(%)'].max()
         if max_discount > 0:
-            agg_df['Discount Score'] = agg_df['Discount'] / max_discount
+            agg_df['Discount Score'] = agg_df['Discount(%)'] / max_discount
         else:
             agg_df['Discount Score'] = 0
         
@@ -301,7 +420,7 @@ def generate_supplier_insights(supplier_data, all_suppliers_data):
     lead_time = supplier_data['Avg Lead Time (days)']
     shipping = supplier_data['Avg Shipping (USD)']
     price_consistency = supplier_data['Price Consistency']
-    discount = supplier_data['Discount']
+    discount = supplier_data['Discount(%)']
     delivery_terms = supplier_data['Delivery Terms']
     
     # Calculate averages across all suppliers
@@ -321,7 +440,7 @@ def generate_supplier_insights(supplier_data, all_suppliers_data):
     # Lead time insight
     lead_diff = lead_time - avg_lead_time_all
     if abs(lead_diff) < 1:
-        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is on per with industry average."
+        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is on par with industry average."
     elif lead_diff < 0:
         insights['lead_time'] = f"Lead time of {lead_time:.1f} days is {abs(lead_diff):.1f} days faster than industry average."
     else:
@@ -365,7 +484,7 @@ def main():
     default_path = r"Catalogs2.csv"
     #file_path = st.text_input("Enter the path to the CSV file:", default_path)
     
-    
+   
     
     # Load and preprocess data
     df = load_data(default_path)
@@ -390,8 +509,8 @@ def main():
             
             # Display matched products
             st.subheader("Matching Products")
-            for i, (product, score) in enumerate(similar_products):
-                if st.button(f"{product} (Score: {score:.2f})", key=f"product_button_{i}"):
+            for i, (product, _) in enumerate(similar_products):
+                if st.button(f"{product}", key=f"product_button_{i}"):
                     st.session_state.selected_product = product
             
             # If a product is selected, show analysis
@@ -408,7 +527,7 @@ def main():
                     # Display supplier comparison
                     st.subheader("Supplier Comparison")
                     display_columns = ['Supplier Name', 'Avg Price (USD)', 'Avg Lead Time (days)', 
-                                      'Avg Shipping (USD)', 'Price Consistency', 'Discount', 'Score(%)']
+                                      'Avg Shipping (USD)', 'Price Consistency', 'Discount(%)', 'Score(%)']
                     st.dataframe(supplier_data[display_columns])
                     
                     # Allow user to select a supplier from dropdown, default to top supplier
