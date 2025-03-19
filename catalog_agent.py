@@ -88,9 +88,8 @@ def find_similar_products(df, query, top_n=5):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
     """
-
     # Filter out rows with empty product_name before processing
-    df = df[df['product_name'].notna() & (df['product_name'] != '')]
+    df = df[df['product_name'].notna() & (df['product_name'] != '')].copy()
     
     # Preprocess the dataframe columns for search - handle empty product_name
     df['search_text'] = df.apply(lambda row: 
@@ -100,6 +99,20 @@ def find_similar_products(df, query, top_n=5):
     
     # Clean the query and product texts
     clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
+    
+    # NEW: Handle singular/plural forms at the beginning
+    query_lower = clean_query.lower()
+    if query_lower.endswith('s'):
+        singular_form = query_lower[:-1]
+        # Create an expanded query that includes both forms
+        expanded_query = f"{query_lower} {singular_form}"
+    else:
+        plural_form = query_lower + 's'
+        # Create an expanded query that includes both forms
+        expanded_query = f"{query_lower} {plural_form}"
+    
+    # Use the expanded query for processing
+    clean_query = expanded_query
     
     # Get unique product texts
     product_texts = df['search_text'].tolist()
@@ -118,6 +131,9 @@ def find_similar_products(df, query, top_n=5):
     exact_matches = []
     partial_phrase_matches = []
     
+    # Original query for exact matches
+    original_query = query.lower()
+    
     # Look for exact phrase matches and consecutive word matches first
     for i, text in enumerate(product_texts):
         text_lower = text.lower()
@@ -128,12 +144,12 @@ def find_similar_products(df, query, top_n=5):
             continue
             
         # Check for exact phrase match in product name (highest priority)
-        if clean_query.lower() in product_name_lower:
+        if original_query in product_name_lower:
             exact_matches.append((product_names[i], 1.0))
             continue
             
         # Check for exact phrase match in search text (high priority)
-        if clean_query.lower() in text_lower:
+        if original_query in text_lower:
             exact_matches.append((product_names[i], 0.9))
             continue
             
@@ -142,14 +158,14 @@ def find_similar_products(df, query, top_n=5):
             partial_phrase_matches.append((product_names[i], 0.8))
             continue
             
-        # NEW: Check for most terms appearing in the product name (more flexible)
+        # Check for most terms appearing in the product name (more flexible)
         if query_length > 2:  # Only for queries with 3+ words
             matches = sum(1 for term in query_terms if term in product_name_lower)
             if matches >= query_length - 1:  # Allow missing one term
                 partial_phrase_matches.append((product_names[i], 0.7))
                 continue
                 
-        # NEW: Check for most terms appearing in the search text
+        # Check for most terms appearing in the search text
         if query_length > 2:  # Only for queries with 3+ words
             matches = sum(1 for term in query_terms if term in text_lower)
             if matches >= query_length - 1:  # Allow missing one term
@@ -193,7 +209,7 @@ def find_similar_products(df, query, top_n=5):
     results = []
     seen_products = set()  # To avoid duplicates
     
-    # MODIFIED: Relaxed threshold for longer queries
+    # Relaxed threshold for longer queries
     min_similarity_threshold = 0.2 if query_length <= 2 else 0.15
     
     # Add semantic context filtering to prevent partial word matches from irrelevant categories
@@ -211,7 +227,7 @@ def find_similar_products(df, query, top_n=5):
                 # Enhanced check for multi-word queries to avoid cross-category matches
                 query_match_count = sum(1 for term in query_terms if term in product_text)
                 
-                # MODIFIED: Relaxed matching criteria for longer queries
+                # Relaxed matching criteria for longer queries
                 min_match_ratio = 0.7 if query_length <= 2 else 0.6
                 
                 # Only include if most query terms appear, or the similarity is very high
@@ -253,40 +269,18 @@ def find_similar_products(df, query, top_n=5):
                         if len(results) >= top_n:
                             break
         
-        # Then try simple substring match for singular/plural forms
-        else:
-            query_lower = query.lower()
-            # Check for singular/plural variations
-            if query_lower.endswith('s'):
-                singular_form = query_lower[:-1]
-                search_forms = [query_lower, singular_form]
-            else:
-                singular_form = query_lower
-                plural_form = query_lower + 's'
-                search_forms = [query_lower, plural_form]
-            
+        # Then try simple substring match for individual words
+        elif not results and query_length > 2:
             for i, name in enumerate(product_names):
                 name_lower = name.lower()
-                # Check for both singular and plural forms
-                if any(form in name_lower for form in search_forms):
+                # Check if at least half of the query terms appear in the name
+                matches = sum(1 for term in query_terms if term in name_lower)
+                if matches >= query_length / 2:
                     if name not in seen_products:
-                        results.append((name, 0.5))
+                        results.append((name, 0.4))
                         seen_products.add(name)
                         if len(results) >= top_n:
                             break
-                            
-            # NEW: If still no results, try matching individual words
-            if not results and query_length > 2:
-                for i, name in enumerate(product_names):
-                    name_lower = name.lower()
-                    # Check if at least half of the query terms appear in the name
-                    matches = sum(1 for term in query_terms if term in name_lower)
-                    if matches >= query_length / 2:
-                        if name not in seen_products:
-                            results.append((name, 0.4))
-                            seen_products.add(name)
-                            if len(results) >= top_n:
-                                break
     
     return results
 
