@@ -526,7 +526,7 @@ def main():
                     st.subheader("Key Matrics Comparison")
                     display_columns = ['Supplier Name', 'Avg Price (USD)', 'Avg Lead Time (days)', 
                                       'Avg Shipping (USD)', 'Price Consistency', 'Discount(%)', 'Score(%)']
-                    st.dataframe(supplier_data[display_columns])
+                    st.dataframe(supplier_data[display_columns],hide_index=True)
                     
                     # Allow user to select a supplier from dropdown, default to top supplier
                     supplier_list = supplier_data['Supplier Name'].tolist()
