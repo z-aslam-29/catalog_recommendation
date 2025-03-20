@@ -94,6 +94,7 @@ def find_similar_products(df, query, top_n=5):
     # Preprocess the dataframe columns for search - handle empty product_name
     df['search_text'] = df.apply(lambda row: 
                                  (row['product_name'] if pd.notna(row['product_name']) else '') + ' ' + 
+                                 (row['category'] if pd.notna(row['category']) else '') + ' ' + 
                                  (row['description'] if pd.notna(row['description']) else '') ,
                                  axis=1)
     
