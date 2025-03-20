@@ -431,20 +431,20 @@ def generate_supplier_insights(supplier_data, all_suppliers_data):
     # Lead time insight
     lead_diff = lead_time - avg_lead_time_all
     if abs(lead_diff) < 1:
-        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is on par with industry average."
+        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is on par with lead time average."
     elif lead_diff < 0:
-        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is {abs(lead_diff):.1f} days faster than industry average."
+        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is {abs(lead_diff):.1f} days faster than lead time average."
     else:
-        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is {lead_diff:.1f} days slower than industry average."
+        insights['lead_time'] = f"Lead time of {lead_time:.1f} days is {lead_diff:.1f} days slower than lead time average."
     
     # Shipping insight
     shipping_diff_pct = ((shipping / avg_shipping_all) - 1) * 100 if avg_shipping_all > 0 else 0
     if abs(shipping_diff_pct) < 5:
-        insights['shipping'] = f"Shipping charges of ${shipping:.2f} are comparable to purchase average."
+        insights['shipping'] = f"Shipping charges of ${shipping:.2f} are comparable to shipping average."
     elif shipping_diff_pct < 0:
-        insights['shipping'] = f"Shipping charges are {abs(shipping_diff_pct):.1f}% lower than purchase average of ${avg_shipping_all:.2f}."
+        insights['shipping'] = f"Shipping charges are {abs(shipping_diff_pct):.1f}% lower than shipping average of ${avg_shipping_all:.2f}."
     else:
-        insights['shipping'] = f"Shipping charges are {shipping_diff_pct:.1f}% higher than purchase average of ${avg_shipping_all:.2f}."
+        insights['shipping'] = f"Shipping charges are {shipping_diff_pct:.1f}% higher than shipping average of ${avg_shipping_all:.2f}."
     
     # Consistency insight
     if price_consistency > 90:
@@ -473,9 +473,6 @@ def main():
     
     # Input for CSV file path
     default_path = r"Catalogs2.csv"
-    #file_path = st.text_input("Enter the path to the CSV file:", default_path)
-    
-   
     
     # Load and preprocess data
     df = load_data(default_path)
@@ -491,7 +488,11 @@ def main():
 
     # Reset selected product if a new search query is entered
     if search_query and 'selected_product' in st.session_state:
-        del st.session_state.selected_product
+        if st.session_state.get('last_search_query', '') != search_query:
+            del st.session_state.selected_product
+            if 'selected_supplier' in st.session_state:
+                del st.session_state.selected_supplier
+    st.session_state.last_search_query = search_query
     
     if search_query:
         # Find similar products
@@ -507,6 +508,8 @@ def main():
             for i, (product, _) in enumerate(similar_products):
                 if st.button(f"{product}", key=f"product_button_{i}"):
                     st.session_state.selected_product = product
+                    if 'selected_supplier' in st.session_state:
+                        del st.session_state.selected_supplier
             
             # If a product is selected, show analysis
             if 'selected_product' in st.session_state:
@@ -520,7 +523,7 @@ def main():
                     st.warning(f"No suppliers found for {selected_product}.")
                 else:
                     # Display supplier comparison
-                    st.subheader("Supplier Comparison")
+                    st.subheader("Key Matrics Comparison")
                     display_columns = ['Supplier Name', 'Avg Price (USD)', 'Avg Lead Time (days)', 
                                       'Avg Shipping (USD)', 'Price Consistency', 'Discount(%)', 'Score(%)']
                     st.dataframe(supplier_data[display_columns])
@@ -532,6 +535,10 @@ def main():
                         supplier_list,
                         index=0  # Default to top supplier (index 0)
                     )
+                    
+                    # Store the selected supplier in session state
+                    if 'selected_supplier' not in st.session_state or st.session_state.selected_supplier != selected_supplier_name:
+                        st.session_state.selected_supplier = selected_supplier_name
                     
                     # Get the selected supplier data
                     selected_supplier = supplier_data[supplier_data['Supplier Name'] == selected_supplier_name].iloc[0]
@@ -545,13 +552,12 @@ def main():
                         st.write(f"• {insight}")
                     
                     # Show all products from this supplier
-                    #st.subheader(f"Products from {selected_supplier_name}")
                     supplier_products = all_products[all_products['supplier_name'] == selected_supplier_name]
                     
                     # Display all columns for the selected supplier
-                    st.subheader(f"Full Details for {selected_supplier_name}")
-                    st.dataframe(supplier_products[[
-                        '_id', 'supplier_name', 'supplier_id', 'product_name', 'parent_category', 'category', 
+                    
+                    columns_to_display=[
+                        'supplier_name', 'supplier_id', 'product_name', 'parent_category', 'category', 
                         'description', 'catalog_id', 'unit_price', 'quantity', 'unit_of_measure', 'lead_time', 
                         'currency', 'specifications.dimensions', 'specifications.manufacturer', 
                         'specifications.weight.value', 'specifications.weight.type', 'specifications.color', 
@@ -559,7 +565,14 @@ def main():
                         'category_type', 'sku_id', 'service_name', 'route', 'equipment', 'distance_miles', 
                         'base_rate_per_mile', 'fuel_surcharge', 'detention_rate_per_hour', 'liftgate_service_rate', 
                         'special_instructions', 'additional_terms_and_conditions', 'additional_services'
-                    ]])
+                    ]
+
+                    # Filter out columns where all values are missing (NaN)
+                    available_columns = [col for col in columns_to_display if not supplier_products[col].isna().all()]
+
+                    # Display only the available columns
+                    st.subheader(f"Catalog Details for {selected_supplier_name}")
+                    st.dataframe(supplier_products[available_columns],hide_index=True)
 
 # Run the app
 if __name__ == "__main__":
