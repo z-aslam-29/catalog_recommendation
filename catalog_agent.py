@@ -65,7 +65,7 @@ def preprocess_data(df):
     df['shipping_charges_usd'] = df['shipping_charges'] * df['currency_rate']
     
     # Extract discount as a numeric value
-    df['discount_value'] = df['discounts'].str.replace('%', '').astype(float) / 100
+    df['discount_value'] = df['discounts'].apply(lambda x: float(str(x).replace('%', '')) / 100 if pd.notna(x) and '%' in str(x) else 0.0)
     
     # Calculate total price (unit price + shipping - discount)
     df['total_price_usd'] = df['unit_price_usd'] + df['shipping_charges_usd']
@@ -77,28 +77,99 @@ def preprocess_data(df):
     
     return df
 
-# Define the stemmed vectorizer first
+# Define the stemmed vectorizer
 class StemmedTfidfVectorizer(TfidfVectorizer):
     def build_analyzer(self):
         analyzer = super(StemmedTfidfVectorizer, self).build_analyzer()
         stemmer = PorterStemmer()
         return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
 
-def find_similar_products(df, query, top_n=5):
+# Rest of the code remains the same...
+
+def find_similar_products(df, query, top_n=6):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
+    Enhanced to handle conversational queries for any product category.
     """
+    # Define category mappings for common search terms
+    category_mappings = {
+        "stationery": ["pen", "pencil", "eraser", "notebook", "paper", "glue", "scissors", "marker", "highlighter", "stapler"],
+        "laptop": ["laptop", "notebook computer", "macbook", "thinkpad", "chromebook", "dell", "hp", "lenovo", "asus"],
+        "desktop": ["desktop", "computer", "tower", "workstation"],
+        "computer": ["laptop", "desktop", "notebook computer", "macbook", "thinkpad", "chromebook", "dell", "hp", "lenovo", "asus"],
+        "phone": ["phone", "smartphone", "iphone", "android", "samsung", "pixel", "mobile"],
+        "tablet": ["tablet", "ipad", "samsung tab", "surface"],
+        "kitchen": ["cookware", "utensil", "knife", "pot", "pan", "blender", "mixer"],
+        "furniture": ["chair", "table", "desk", "sofa", "cabinet", "bookshelf"],
+        "clothing": ["shirt", "pant", "dress", "jacket", "sweater", "coat"],
+        'metal': ['bar', 'round', 'square', 'stainless', 'steel', 'aluminum', 'metal', 'mm', 'inch'],
+        'tool': ['wrench', 'screwdriver', 'caliper', 'tool', 'pneumatic', 'impact'],
+        'adhesive': ['glue', 'adhesive', 'paste', 'all purpose'],
+        'mechanical': ['belt', 'hose', 'assembly', 'hydraulic', 'v-belt'],
+        'bar': ['metal bar', 'steel bar', 'aluminum bar', 'round bar', 'square bar', 'mm']
+    }
+    
+    # Add plural forms to category mappings
+    expanded_mappings = {}
+    for category, terms in category_mappings.items():
+        expanded_terms = terms.copy()
+        # Add plural forms for category terms
+        plural_category = category + 's' if not category.endswith('s') else category
+        expanded_mappings[category] = terms
+        expanded_mappings[plural_category] = terms
+        
+        # Also add plural forms for each term
+        for term in terms:
+            plural_term = term + 's' if not term.endswith('s') else term
+            if plural_term not in expanded_terms:
+                expanded_terms.append(plural_term)
+        expanded_mappings[category] = expanded_terms
+        expanded_mappings[plural_category] = expanded_terms
+    
+    # Conversational query analysis - extract key product terms
+    query_lower = query.lower().strip()
+    
+    # Common intent phrases to filter out
+    intent_phrases = [
+        "i want", "i need", "looking for", "searching for", "where can i find", 
+        "i would like", "can i get", "do you have", "show me", "buy", "purchase",
+        "to buy", "to get", "to find", "to purchase"
+    ]
+    
+    # Remove intent phrases to focus on product terms
+    cleaned_query = query_lower
+    for phrase in intent_phrases:
+        if phrase in cleaned_query:
+            cleaned_query = cleaned_query.replace(phrase, "")
+    
+    # Strip extra spaces and articles
+    cleaned_query = re.sub(r'\s+', ' ', cleaned_query).strip()
+    cleaned_query = re.sub(r'\b(a|an|the)\b', '', cleaned_query).strip()
+    
+    # Extract product keywords - remove common filler words
+    filler_words = ['product', 'products', 'item', 'items', 'some']
+    product_terms = []
+    for word in cleaned_query.split():
+        if word not in filler_words:
+            product_terms.append(word)
+    
+    product_term = ' '.join(product_terms)
+    
+    # If product term is empty after cleaning, use original query
+    if not product_term:
+        product_term = query_lower
+    
     # Filter out rows with empty product_name before processing
     df = df[df['product_name'].notna() & (df['product_name'] != '')].copy()
     
-    # Preprocess the dataframe columns for search - handle empty product_name
+    # Preprocess the dataframe columns for search
     df['search_text'] = df.apply(lambda row: 
-                                 (row['product_name'] if pd.notna(row['product_name']) else '') + ' ' + 
-                                 (row['category'] if pd.notna(row['category']) else '') + ' ' + 
-                                 (row['description'] if pd.notna(row['description']) else '') ,
-                                 axis=1)
+                               (row['product_name'] if pd.notna(row['product_name']) else '') + ' ' + 
+                               (row['category'] if pd.notna(row['category']) else '') + ' ' + 
+                               (row['description'] if pd.notna(row['description']) else ''),
+                               axis=1)
     
-    # Clean the query and product texts
+        # Clean the query and product texts
     clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
     
     # Handle singular/plural forms
@@ -118,79 +189,104 @@ def find_similar_products(df, query, top_n=5):
     
     # Create a combined product name field that uses service_name as fallback
     df['display_name'] = df.apply(lambda row: 
-                                 row['product_name'] if pd.notna(row['product_name']) 
-                                 else 'Unknown', axis=1)
-    product_names = df['display_name'].tolist()
+                                row['product_name'] if pd.notna(row['product_name']) 
+                                else 'Unknown', axis=1)
     
-    # Extract key terms from query for exact phrase matching
-    query_terms = clean_query.strip().lower().split()
-    query_length = len(query_terms)
+    # First handle direct category mapping for any product category
+    known_category_matches = []
+    product_term_words = product_term.split()
     
-    # First try to match the exact phrase with higher priority
-    exact_matches = []
-    partial_phrase_matches = []
+    # Check if any of the words in the product term match our categories
+    matching_categories = []
+    for word in product_term_words:
+        if word in expanded_mappings:
+            matching_categories.append(word)
     
-    # Original query for exact matches
-    original_query = query.lower()
+    # If we have matching categories, prioritize products from those categories
+    if matching_categories:
+        for category in matching_categories:
+            related_products = expanded_mappings[category]
+            
+            # Find products that match any of the related terms
+            for i, row in df.iterrows():
+                product_name = row['display_name'].lower()
+                search_text = row['search_text'].lower()
+                
+                # Direct category match in the product name gets highest priority
+                if category in product_name:
+                    known_category_matches.append((row['display_name'], 1.0))
+                    continue
+                
+                # Check if any related terms appear in the product name
+                for related_term in related_products:
+                    if related_term.lower() in product_name:
+                        known_category_matches.append((row['display_name'], 0.9))
+                        break
+                
+                # If not found in product name, check entire search text
+                if not any(related_term.lower() in product_name for related_term in related_products):
+                    for related_term in related_products:
+                        if related_term.lower() in search_text:
+                            known_category_matches.append((row['display_name'], 0.7))
+                            break
     
-    # Look for exact phrase matches and consecutive word matches first
-    for i, text in enumerate(product_texts):
-        text_lower = text.lower()
-        product_name_lower = product_names[i].lower()
-        
-        # Skip entries without a product name or service name
-        if product_name_lower == 'unknown':
-            continue
+    # Check for direct matches even if not in category mappings
+    # This handles specific product searches like "steel bar" that might not be in mappings
+    if product_term and not known_category_matches:
+        for i, row in df.iterrows():
+            product_name = row['display_name'].lower()
+            search_text = row['search_text'].lower()
             
-        # Check for exact phrase match in product name (highest priority)
-        if original_query in product_name_lower:
-            exact_matches.append((product_names[i], 1.0))
-            continue
-            
-        # Check for exact phrase match in search text (high priority)
-        if original_query in text_lower:
-            exact_matches.append((product_names[i], 0.9))
-            continue
-            
-        # Check for all terms appearing in the product name, even if not consecutive
-        if query_length > 1 and all(term in product_name_lower for term in query_terms):
-            partial_phrase_matches.append((product_names[i], 0.8))
-            continue
-            
-        # Check for most terms appearing in the product name (more flexible)
-        if query_length > 2:  # Only for queries with 3+ words
-            matches = sum(1 for term in query_terms if term in product_name_lower)
-            if matches >= query_length - 1:  # Allow missing one term
-                partial_phrase_matches.append((product_names[i], 0.7))
+            # Exact match in product name
+            if product_term in product_name:
+                known_category_matches.append((row['display_name'], 0.95))
                 continue
                 
-        # Check for most terms appearing in the search text
-        if query_length > 2:  # Only for queries with 3+ words
-            matches = sum(1 for term in query_terms if term in text_lower)
-            if matches >= query_length - 1:  # Allow missing one term
-                partial_phrase_matches.append((product_names[i], 0.6))
+            # Check for all words appearing in product name
+            if all(word in product_name for word in product_term_words):
+                known_category_matches.append((row['display_name'], 0.9))
+                continue
+                
+            # Check for all words appearing in search text
+            if all(word in search_text for word in product_term_words):
+                known_category_matches.append((row['display_name'], 0.8))
                 continue
     
-    # If we have exact or good partial matches, return those
-    if exact_matches or partial_phrase_matches:
+    # If we have category or direct matches, sort by score and return top results
+    if known_category_matches:
         # Remove duplicates while preserving order
         unique_results = []
         seen_products = set()
-        for product, score in exact_matches + partial_phrase_matches:
+        for product, score in sorted(known_category_matches, key=lambda x: x[1], reverse=True):
             if product not in seen_products:
                 unique_results.append((product, score))
                 seen_products.add(product)
-                
                 if len(unique_results) >= top_n:
                     break
-                    
-        return unique_results[:top_n]
+        
+        if unique_results:
+            return unique_results[:top_n]
     
-    # Fall back to TF-IDF + semantic context scoring if no exact matches
+    # If no matches found through direct matching, fall back to TF-IDF
+    # Define the StemmedTfidfVectorizer
+    class StemmedTfidfVectorizer(TfidfVectorizer):
+        def build_analyzer(self):
+            analyzer = super(StemmedTfidfVectorizer, self).build_analyzer()
+            stemmer = PorterStemmer()
+            return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
+    
+    # Use the cleaned query that focuses on product terms
+    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', product_term)
+    
+    # Get unique product texts
+    product_texts = df['search_text'].tolist()
+    product_names = df['display_name'].tolist()
+    
+    # Use TF-IDF with stemming
     vectorizer = StemmedTfidfVectorizer(
         analyzer='word',
         token_pattern=r'(?u)\b\w+[\'"\-\w]*\b|\d+[\'"\"]',
-        ngram_range=(1, 2),  # Consider both unigrams and bigrams
+        ngram_range=(1, 2),
         stop_words='english',
         lowercase=True
     )
@@ -206,82 +302,35 @@ def find_similar_products(df, query, top_n=5):
     
     # Create a list of tuples (product_name, similarity_score)
     results = []
-    seen_products = set()  # To avoid duplicates
+    seen_products = set()
     
-    # Relaxed threshold for longer queries
-    min_similarity_threshold = 0.2 if query_length <= 2 else 0.15
-    
-    # Add semantic context filtering to prevent partial word matches from irrelevant categories
     for i in sorted_indices:
-        if cosine_similarities[i] > min_similarity_threshold:  # Lower threshold for longer queries
+        if cosine_similarities[i] > 0.1:  # Lower threshold for fallback
             product_name = product_names[i]
             
             # Skip if we've already seen this product
             if product_name in seen_products:
                 continue
-                
-            product_text = product_texts[i].lower()
             
-            if query_length > 1:
-                # Enhanced check for multi-word queries to avoid cross-category matches
-                query_match_count = sum(1 for term in query_terms if term in product_text)
-                
-                # Relaxed matching criteria for longer queries
-                min_match_ratio = 0.7 if query_length <= 2 else 0.6
-                
-                # Only include if most query terms appear, or the similarity is very high
-                if query_match_count / query_length >= min_match_ratio or cosine_similarities[i] > 0.5:
-                    # Check if the product name or description suggests a different category
-                    if not all(term in product_text for term in query_terms) and cosine_similarities[i] < 0.6:
-                        # Apply a penalty to similarity score
-                        adjusted_score = cosine_similarities[i] * 0.7  # Less penalty
-                    else:
-                        adjusted_score = cosine_similarities[i]
-                    
-                    results.append((product_name, adjusted_score))
-                    seen_products.add(product_name)
-            else:
-                # For single word queries, still apply some filtering to avoid cross-category matches
-                results.append((product_name, cosine_similarities[i]))
-                seen_products.add(product_name)
+            results.append((product_name, cosine_similarities[i]))
+            seen_products.add(product_name)
             
-            # Stop when we have enough results
             if len(results) >= top_n:
                 break
     
-    # If still no results found, use direct substring match as fallback
+    # If still no results, use substring matching as last resort
     if not results:
-        # First try inch pattern
-        inch_pattern = r'(\d+)["\'"]'
-        query_has_inches = re.search(inch_pattern, query)
-        
-        if query_has_inches:
-            # Extract the numeric part
-            inch_value = query_has_inches.group(1)
-            
-            # Look for products containing this inch value with quotes
-            for i, name in enumerate(product_names):
-                if f"{inch_value}\"" in name or f"{inch_value} inch" in name.lower():
-                    if name not in seen_products:
-                        results.append((name, 0.5))
-                        seen_products.add(name)
-                        if len(results) >= top_n:
-                            break
-        
-        # Then try simple substring match for individual words
-        elif not results:
-            for i, name in enumerate(product_names):
-                name_lower = name.lower()
-                # Check if any of the query terms appear in the name
-                if any(term in name_lower for term in query_terms):
-                    if name not in seen_products:
-                        results.append((name, 0.4))
-                        seen_products.add(name)
-                        if len(results) >= top_n:
-                            break
+        for i, name in enumerate(product_names):
+            name_lower = name.lower()
+            # Check if any words from the clean query appear in the name
+            if any(word in name_lower for word in clean_query.split()):
+                if name not in seen_products:
+                    results.append((name, 0.4))
+                    seen_products.add(name)
+                    if len(results) >= top_n:
+                        break
     
     return results
-
 
 # Find and analyze suppliers
 def find_and_analyze_suppliers(df, product_name, top_n=5):
