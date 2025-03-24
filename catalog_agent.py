@@ -609,7 +609,7 @@ def main():
     st.title("Catalog Recommendation Agent")
     
     # Input for CSV file path
-    default_path = "C:\\Users\\shaik\\Downloads\\Catalogs2.csv"
+    default_path = r"Catalogs2.csv"
     
     # Load and preprocess data
     df = load_data(default_path)
