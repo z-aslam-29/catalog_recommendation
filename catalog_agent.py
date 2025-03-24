@@ -8,6 +8,7 @@ import warnings
 import nltk
 import os
 import re
+from difflib import get_close_matches
 
 nltk.download('punkt')
 
@@ -84,12 +85,76 @@ class StemmedTfidfVectorizer(TfidfVectorizer):
         stemmer = PorterStemmer()
         return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
 
-# Rest of the code remains the same...
+# NEW FUNCTION: Helper function for spell correction
+def correct_spelling(word, vocabulary, threshold=0.8):
+    """Correct spelling using a vocabulary of known words and get_close_matches"""
+    if word in vocabulary:
+        return word
+    
+    # Find close matches in the vocabulary
+    matches = get_close_matches(word, vocabulary, n=1, cutoff=threshold)
+    return matches[0] if matches else word
 
+# NEW FUNCTION: Create vocabulary from dataframe
+def create_vocabulary(df):
+    """Extract common words from product names, categories, and descriptions"""
+    vocabulary = set()
+    
+    # Add category mapping terms to vocabulary
+    category_mappings = {
+        "stationery": ["pen", "pencil", "eraser", "notebook", "paper", "glue", "scissors", "marker", "highlighter", "stapler"],
+        "laptop": ["laptop", "notebook computer", "macbook", "thinkpad", "chromebook", "dell", "hp", "lenovo", "asus"],
+        "desktop": ["desktop", "computer", "tower", "workstation"],
+        "computer": ["laptop", "desktop", "notebook computer", "macbook", "thinkpad", "chromebook", "dell", "hp", "lenovo", "asus"],
+        "phone": ["phone", "smartphone", "iphone", "android", "samsung", "pixel", "mobile"],
+        "tablet": ["tablet", "ipad", "samsung tab", "surface"],
+        "kitchen": ["cookware", "utensil", "knife", "pot", "pan", "blender", "mixer"],
+        "furniture": ["chair", "table", "desk", "sofa", "cabinet", "bookshelf"],
+        "clothing": ["shirt", "pant", "dress", "jacket", "sweater", "coat"],
+        'metal': ['bar', 'round', 'square', 'stainless', 'steel', 'aluminum', 'metal', 'mm', 'inch'],
+        'tool': ['wrench', 'screwdriver', 'caliper', 'tool', 'pneumatic', 'impact'],
+        'adhesive': ['glue', 'adhesive', 'paste', 'all purpose'],
+        'mechanical': ['belt', 'hose', 'assembly', 'hydraulic', 'v-belt'],
+        'bar': ['metal bar', 'steel bar', 'aluminum bar', 'round bar', 'square bar', 'mm']
+    }
+    
+    # Add all category terms to vocabulary
+    for category, terms in category_mappings.items():
+        vocabulary.add(category)
+        vocabulary.add(category + 's') # Add plural form
+        for term in terms:
+            vocabulary.add(term)
+            vocabulary.add(term + 's') # Add plural form
+    
+    # Extract words from product names
+    for name in df['product_name'].dropna():
+        words = re.findall(r'\b\w+\b', name.lower())
+        vocabulary.update(words)
+    
+    # Extract words from categories
+    if 'category' in df.columns:
+        for category in df['category'].dropna():
+            words = re.findall(r'\b\w+\b', str(category).lower())
+            vocabulary.update(words)
+            
+    # Extract words from parent categories
+    if 'parent_category' in df.columns:
+        for category in df['parent_category'].dropna():
+            words = re.findall(r'\b\w+\b', str(category).lower())
+            vocabulary.update(words)
+    
+    # Extract common words from descriptions (limit to avoid too many technical terms)
+    for desc in df['description'].dropna().head(100):  # Limit to first 100 for efficiency
+        words = re.findall(r'\b\w{3,15}\b', str(desc).lower())  # Words between 3-15 chars
+        vocabulary.update(words)
+    
+    return vocabulary
+
+# Modified function to find similar products with spell correction
 def find_similar_products(df, query, top_n=6):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
-    Enhanced to handle conversational queries for any product category.
+    Enhanced to handle conversational queries and spelling errors for any product category.
     """
     # Define category mappings for common search terms
     category_mappings = {
@@ -126,6 +191,9 @@ def find_similar_products(df, query, top_n=6):
         expanded_mappings[category] = expanded_terms
         expanded_mappings[plural_category] = expanded_terms
     
+    # Create vocabulary for spell correction
+    vocabulary = create_vocabulary(df)
+    
     # Conversational query analysis - extract key product terms
     query_lower = query.lower().strip()
     
@@ -148,16 +216,23 @@ def find_similar_products(df, query, top_n=6):
     
     # Extract product keywords - remove common filler words
     filler_words = ['product', 'products', 'item', 'items', 'some']
-    product_terms = []
+    
+    # Apply spell correction to each word
+    corrected_terms = []
     for word in cleaned_query.split():
         if word not in filler_words:
-            product_terms.append(word)
+            corrected_word = correct_spelling(word, vocabulary, threshold=0.75)
+            corrected_terms.append(corrected_word)
     
-    product_term = ' '.join(product_terms)
+    product_term = ' '.join(corrected_terms)
     
     # If product term is empty after cleaning, use original query
     if not product_term:
         product_term = query_lower
+    
+    # Show spell correction as debug info (can be commented out in production)
+    if product_term != cleaned_query.strip() and product_term:
+        st.info(f"Searching for: '{product_term}' (corrected from '{query_lower}')")
     
     # Filter out rows with empty product_name before processing
     df = df[df['product_name'].notna() & (df['product_name'] != '')].copy()
@@ -169,8 +244,8 @@ def find_similar_products(df, query, top_n=6):
                                (row['description'] if pd.notna(row['description']) else ''),
                                axis=1)
     
-        # Clean the query and product texts
-    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
+    # Clean the query and product texts
+    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', product_term)
     
     # Handle singular/plural forms
     query_lower = clean_query.lower()
@@ -202,6 +277,16 @@ def find_similar_products(df, query, top_n=6):
         if word in expanded_mappings:
             matching_categories.append(word)
     
+    # Try fuzzy matching for categories if no exact match
+    if not matching_categories:
+        for word in product_term_words:
+            # Try to find close matches to categories
+            for category in expanded_mappings.keys():
+                # Use Levenshtein distance via get_close_matches
+                if get_close_matches(word, [category], n=1, cutoff=0.8):
+                    matching_categories.append(category)
+                    break
+    
     # If we have matching categories, prioritize products from those categories
     if matching_categories:
         for category in matching_categories:
@@ -230,7 +315,7 @@ def find_similar_products(df, query, top_n=6):
                             known_category_matches.append((row['display_name'], 0.7))
                             break
     
-    # Check for direct matches even if not in category mappings
+    # Check for direct and fuzzy matches with product terms
     # This handles specific product searches like "steel bar" that might not be in mappings
     if product_term and not known_category_matches:
         for i, row in df.iterrows():
@@ -245,6 +330,21 @@ def find_similar_products(df, query, top_n=6):
             # Check for all words appearing in product name
             if all(word in product_name for word in product_term_words):
                 known_category_matches.append((row['display_name'], 0.9))
+                continue
+                
+            # Fuzzy match for product names
+            # Check if each word has a close match in the product name
+            product_name_words = product_name.split()
+            match_count = 0
+            for word in product_term_words:
+                for prod_word in product_name_words:
+                    if get_close_matches(word, [prod_word], n=1, cutoff=0.8):
+                        match_count += 1
+                        break
+            
+            # If most words match, consider it a fuzzy match
+            if match_count >= max(1, len(product_term_words) * 0.7):  # At least 70% of words match
+                known_category_matches.append((row['display_name'], 0.85))
                 continue
                 
             # Check for all words appearing in search text
@@ -276,7 +376,7 @@ def find_similar_products(df, query, top_n=6):
             return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
     
     # Use the cleaned query that focuses on product terms
-    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', product_term)
+    clean_query = product_term  # Use the spell-corrected term
     
     # Get unique product texts
     product_texts = df['search_text'].tolist()
@@ -305,7 +405,7 @@ def find_similar_products(df, query, top_n=6):
     seen_products = set()
     
     for i in sorted_indices:
-        if cosine_similarities[i] > 0.1:  # Lower threshold for fallback
+        if cosine_similarities[i] > 0.08:  # Lower threshold for better recall
             product_name = product_names[i]
             
             # Skip if we've already seen this product
@@ -317,20 +417,6 @@ def find_similar_products(df, query, top_n=6):
             
             if len(results) >= top_n:
                 break
-    
-    # If still no results, use substring matching as last resort
-    if not results:
-        for i, name in enumerate(product_names):
-            name_lower = name.lower()
-            # Check if any words from the clean query appear in the name
-            if any(word in name_lower for word in clean_query.split()):
-                if name not in seen_products:
-                    results.append((name, 0.4))
-                    seen_products.add(name)
-                    if len(results) >= top_n:
-                        break
-    
-    return results
 
 # Find and analyze suppliers
 def find_and_analyze_suppliers(df, product_name, top_n=5):
@@ -518,11 +604,12 @@ def generate_supplier_insights(supplier_data, all_suppliers_data):
     return insights
 
 # Set up the Streamlit app
+# Set up the Streamlit app
 def main():
     st.title("Catalog Recommendation Agent")
     
     # Input for CSV file path
-    default_path = r"Catalogs2.csv"
+    default_path = "C:\\Users\\shaik\\Downloads\\Catalogs2.csv"
     
     # Load and preprocess data
     df = load_data(default_path)
