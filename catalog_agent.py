@@ -131,7 +131,8 @@ def find_similar_products(df, query, top_n=6):
         "computer": ["laptop", "desktop", "notebook computer", "macbook", "thinkpad", "chromebook", "dell", "hp", "lenovo", "asus"],
         "phone": ["phone", "smartphone", "iphone", "android", "samsung", "pixel", "mobile"],
         "tablet": ["tablet", "ipad", "samsung tab", "surface"],
-        "ball": ["scoccer","football"],
+        "ball pen": ["ball pen", "ballpoint pen", "ballpoint"],
+        "pen": ["pen", "ball pen", "ballpoint pen", "gel pen", "fountain pen", "marker pen"],
         "kitchen": ["cookware", "utensil", "knife", "pot", "pan", "blender", "mixer"],
         "furniture": ["chair", "table", "desk", "sofa", "cabinet", "bookshelf"],
         "clothing": ["shirt", "pant", "dress", "jacket", "sweater", "coat"],
@@ -180,8 +181,6 @@ def find_similar_products(df, query, top_n=6):
     
     # Check if query was corrected
     if corrected_query != query_lower:
-        # Only log this during development
-        # In production, you might want to show this to the user
         print(f"Corrected query: '{query_lower}' -> '{corrected_query}'")
     
     # Common intent phrases to filter out
@@ -247,8 +246,36 @@ def find_similar_products(df, query, top_n=6):
                                 row['product_name'] if pd.notna(row['product_name']) 
                                 else 'Unknown', axis=1)
     
-    # First handle direct category mapping for any product category
     known_category_matches = []
+    
+    # First check for exact phrase matches in product names
+    query_lower = query.lower()
+    for i, row in df.iterrows():
+        product_name = row['display_name'].lower()
+        if query_lower in product_name:
+            known_category_matches.append((row['display_name'], 1.0))  # Highest score for exact match
+    
+    # Then check for all words appearing in order (but not necessarily contiguous)
+    if not known_category_matches:
+        query_words = query_lower.split()
+        for i, row in df.iterrows():
+            product_name = row['display_name'].lower()
+            product_words = product_name.split()
+            
+            # Check if all query words appear in order in product name
+            match_positions = []
+            for q_word in query_words:
+                for pos, p_word in enumerate(product_words):
+                    if q_word in p_word and pos not in match_positions:
+                        match_positions.append(pos)
+                        break
+            
+            if len(match_positions) == len(query_words):
+                # Check if words appear in order
+                if match_positions == sorted(match_positions):
+                    known_category_matches.append((row['display_name'], 0.9))
+    
+    # Then handle direct category mapping for any product category
     product_term_words = product_term.split()
     
     # Check if any of the words in the product term match our categories
@@ -279,19 +306,19 @@ def find_similar_products(df, query, top_n=6):
                 
                 # Direct category match in the product name gets highest priority
                 if category.lower() in product_name:
-                    known_category_matches.append((row['display_name'], 1.0))
+                    known_category_matches.append((row['display_name'], 0.85))
                     continue
                 
                 # Check if any related terms appear in the product name with fuzzy matching
                 for related_term in related_products:
                     # Direct match
                     if related_term.lower() in product_name:
-                        known_category_matches.append((row['display_name'], 0.9))
+                        known_category_matches.append((row['display_name'], 0.8))
                         break
                     
                     # Fuzzy match for product names
                     if fuzz.partial_ratio(related_term.lower(), product_name) > 85:
-                        known_category_matches.append((row['display_name'], 0.85))
+                        known_category_matches.append((row['display_name'], 0.75))
                         break
                 
                 # If not found in product name, check entire search text
@@ -378,66 +405,74 @@ def find_similar_products(df, query, top_n=6):
             return unique_results[:top_n]
     
     # If no matches found through direct matching, fall back to TF-IDF
-    # Define the StemmedTfidfVectorizer
-    class StemmedTfidfVectorizer(TfidfVectorizer):
-        def build_analyzer(self):
-            analyzer = super(StemmedTfidfVectorizer, self).build_analyzer()
-            stemmer = PorterStemmer()
-            return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
+    # First filter to only products that contain all query words
+    query_words = set(clean_query.lower().split())
+    filtered_df = df.copy()
+    filtered_df['word_matches'] = filtered_df['search_text'].apply(
+        lambda text: sum(1 for word in query_words if word in text.lower()))
+    filtered_df = filtered_df[filtered_df['word_matches'] == len(query_words)]
     
-    # Use the cleaned query that focuses on product terms
-    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', product_term)
-    
-    # Get unique product texts
-    product_texts = df['search_text'].tolist()
-    product_names = df['display_name'].tolist()
-    
-    # Use TF-IDF with stemming
-    vectorizer = StemmedTfidfVectorizer(
-        analyzer='word',
-        token_pattern=r'(?u)\b\w+[\'"\-\w]*\b|\d+[\'"\"]',
-        ngram_range=(1, 2),
-        stop_words='english',
-        lowercase=True
-    )
-    
-    tfidf_matrix = vectorizer.fit_transform(product_texts)
-    
-    # Transform the query using the same vectorizer
-    query_vector = vectorizer.transform([clean_query])
-    cosine_similarities = cosine_similarity(query_vector, tfidf_matrix).flatten()
-    
-    # Get indices sorted by similarity score in descending order
-    sorted_indices = np.argsort(cosine_similarities)[::-1]
-    
-    # Create a list of tuples (product_name, similarity_score)
-    results = []
-    seen_products = set()
-    
-    for i in sorted_indices:
-        if cosine_similarities[i] > 0.1:  # Lower threshold for fallback
-            product_name = product_names[i]
-            
-            # Skip if we've already seen this product
-            if product_name in seen_products:
-                continue
-            
-            results.append((product_name, cosine_similarities[i]))
-            seen_products.add(product_name)
-            
-            if len(results) >= top_n:
-                break
+    if not filtered_df.empty:
+        product_texts = filtered_df['search_text'].tolist()
+        product_names = filtered_df['display_name'].tolist()
+        
+        # Define the StemmedTfidfVectorizer
+        class StemmedTfidfVectorizer(TfidfVectorizer):
+            def build_analyzer(self):
+                analyzer = super(StemmedTfidfVectorizer, self).build_analyzer()
+                stemmer = PorterStemmer()
+                return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
+        
+        # Use TF-IDF with stemming
+        vectorizer = StemmedTfidfVectorizer(
+            analyzer='word',
+            token_pattern=r'(?u)\b\w+[\'"\-\w]*\b|\d+[\'"\"]',
+            ngram_range=(1, 2),
+            stop_words='english',
+            lowercase=True
+        )
+        
+        tfidf_matrix = vectorizer.fit_transform(product_texts)
+        
+        # Transform the query using the same vectorizer
+        query_vector = vectorizer.transform([clean_query])
+        cosine_similarities = cosine_similarity(query_vector, tfidf_matrix).flatten()
+        
+        # Get indices sorted by similarity score in descending order
+        sorted_indices = np.argsort(cosine_similarities)[::-1]
+        
+        # Create a list of tuples (product_name, similarity_score)
+        results = []
+        seen_products = set()
+        
+        for i in sorted_indices:
+            if cosine_similarities[i] > 0.1:  # Lower threshold for fallback
+                product_name = product_names[i]
+                
+                # Skip if we've already seen this product
+                if product_name in seen_products:
+                    continue
+                
+                results.append((product_name, cosine_similarities[i]))
+                seen_products.add(product_name)
+                
+                if len(results) >= top_n:
+                    break
     
     # If still no results, use fuzzy matching as last resort
     if not results:
         fuzzy_results = []
+        query_words = set(clean_query.lower().split())
         for product_name in product_names:
-            # Calculate fuzzy match score
-            score = fuzz.token_sort_ratio(clean_query, product_name.lower())
-            if score > 60:  # Only consider reasonably good matches
-                if product_name not in seen_products:
-                    fuzzy_results.append((product_name, score / 100))  # Normalize score to 0-1 range
-                    seen_products.add(product_name)
+            # Only consider products that contain all query words
+            product_lower = product_name.lower()
+            if all(word in product_lower for word in query_words):
+                # Calculate fuzzy match score
+                score = fuzz.token_sort_ratio(clean_query, product_lower)
+                if score > 70:  # Higher threshold for fuzzy matches
+                    if product_name not in seen_products:
+                        fuzzy_results.append((product_name, score / 100))
+                        seen_products.add(product_name)
         
         # Sort by score and return top matches
         if fuzzy_results:
