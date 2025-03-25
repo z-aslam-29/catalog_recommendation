@@ -8,6 +8,8 @@ import warnings
 import nltk
 import os
 import re
+import difflib
+from rapidfuzz import fuzz, process
 
 nltk.download('punkt')
 
@@ -84,12 +86,42 @@ class StemmedTfidfVectorizer(TfidfVectorizer):
         stemmer = PorterStemmer()
         return lambda doc: [stemmer.stem(word) for word in analyzer(doc)]
 
-# Rest of the code remains the same...
+# Function to handle spelling corrections
+def correct_spelling(query, reference_words, threshold=90):
+    """
+    Correct misspelled words in a query using fuzzy matching against reference words.
+    
+    Args:
+        query (str): The user query
+        reference_words (list): List of valid words to check against
+        threshold (int): Minimum similarity score (0-100) to accept a correction
+        
+    Returns:
+        str: Corrected query
+    """
+    words = query.lower().split()
+    corrected_words = []
+    
+    for word in words:
+        # Skip very short words, stop words, or numbers
+        if len(word) <= 2 or word.isdigit():
+            corrected_words.append(word)
+            continue
+            
+        # Use rapidfuzz to find closest matches
+        matches = process.extract(word, reference_words, scorer=fuzz.ratio, limit=1)
+        
+        if matches and matches[0][1] >= threshold:
+            corrected_words.append(matches[0][0])
+        else:
+            corrected_words.append(word)
+    
+    return ' '.join(corrected_words)
 
 def find_similar_products(df, query, top_n=6):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
-    Enhanced to handle conversational queries for any product category.
+    Enhanced to handle typos and spelling mistakes using fuzzy matching.
     """
     # Define category mappings for common search terms
     category_mappings = {
@@ -99,6 +131,7 @@ def find_similar_products(df, query, top_n=6):
         "computer": ["laptop", "desktop", "notebook computer", "macbook", "thinkpad", "chromebook", "dell", "hp", "lenovo", "asus"],
         "phone": ["phone", "smartphone", "iphone", "android", "samsung", "pixel", "mobile"],
         "tablet": ["tablet", "ipad", "samsung tab", "surface"],
+        "ball": ["scoccer","football"],
         "kitchen": ["cookware", "utensil", "knife", "pot", "pan", "blender", "mixer"],
         "furniture": ["chair", "table", "desk", "sofa", "cabinet", "bookshelf"],
         "clothing": ["shirt", "pant", "dress", "jacket", "sweater", "coat"],
@@ -126,8 +159,30 @@ def find_similar_products(df, query, top_n=6):
         expanded_mappings[category] = expanded_terms
         expanded_mappings[plural_category] = expanded_terms
     
-    # Conversational query analysis - extract key product terms
+    # Create a reference vocabulary for spelling correction
+    reference_vocabulary = []
+    for category, terms in expanded_mappings.items():
+        reference_vocabulary.append(category)
+        reference_vocabulary.extend(terms)
+    
+    # Get unique product names for spelling correction
+    all_product_words = set()
+    for product_name in df['product_name'].dropna():
+        words = re.findall(r'\b\w+\b', product_name.lower())
+        all_product_words.update(words)
+    
+    reference_vocabulary.extend(list(all_product_words))
+    reference_vocabulary = list(set(reference_vocabulary))  # Remove duplicates
+    
+    # Apply spelling correction to the query
     query_lower = query.lower().strip()
+    corrected_query = correct_spelling(query_lower, reference_vocabulary)
+    
+    # Check if query was corrected
+    if corrected_query != query_lower:
+        # Only log this during development
+        # In production, you might want to show this to the user
+        print(f"Corrected query: '{query_lower}' -> '{corrected_query}'")
     
     # Common intent phrases to filter out
     intent_phrases = [
@@ -137,7 +192,7 @@ def find_similar_products(df, query, top_n=6):
     ]
     
     # Remove intent phrases to focus on product terms
-    cleaned_query = query_lower
+    cleaned_query = corrected_query
     for phrase in intent_phrases:
         if phrase in cleaned_query:
             cleaned_query = cleaned_query.replace(phrase, "")
@@ -157,7 +212,7 @@ def find_similar_products(df, query, top_n=6):
     
     # If product term is empty after cleaning, use original query
     if not product_term:
-        product_term = query_lower
+        product_term = corrected_query
     
     # Filter out rows with empty product_name before processing
     df = df[df['product_name'].notna() & (df['product_name'] != '')].copy()
@@ -169,17 +224,17 @@ def find_similar_products(df, query, top_n=6):
                                (row['description'] if pd.notna(row['description']) else ''),
                                axis=1)
     
-        # Clean the query and product texts
-    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', query)
+    # Clean the query and product texts
+    clean_query = re.sub(r'[^\w\s\'"\-]', ' ', product_term)
     
     # Handle singular/plural forms
-    query_lower = clean_query.lower()
-    if query_lower.endswith('s'):
-        singular_form = query_lower[:-1]  # Remove 's' for singular form
-        expanded_query = f"{query_lower} {singular_form}"  # Include both forms
+    product_term_lower = clean_query.lower()
+    if product_term_lower.endswith('s'):
+        singular_form = product_term_lower[:-1]  # Remove 's' for singular form
+        expanded_query = f"{product_term_lower} {singular_form}"  # Include both forms
     else:
-        plural_form = query_lower + 's'  # Add 's' for plural form
-        expanded_query = f"{query_lower} {plural_form}"  # Include both forms
+        plural_form = product_term_lower + 's'  # Add 's' for plural form
+        expanded_query = f"{product_term_lower} {plural_form}"  # Include both forms
     
     # Use the expanded query for processing
     clean_query = expanded_query
@@ -199,8 +254,18 @@ def find_similar_products(df, query, top_n=6):
     # Check if any of the words in the product term match our categories
     matching_categories = []
     for word in product_term_words:
-        if word in expanded_mappings:
-            matching_categories.append(word)
+        # Use fuzzy matching for category identification
+        best_category_match = None
+        best_score = 0
+        
+        for category in expanded_mappings:
+            score = fuzz.ratio(word.lower(), category.lower())
+            if score > 80 and score > best_score:  # High threshold for categories
+                best_score = score
+                best_category_match = category
+        
+        if best_category_match:
+            matching_categories.append(best_category_match)
     
     # If we have matching categories, prioritize products from those categories
     if matching_categories:
@@ -213,14 +278,20 @@ def find_similar_products(df, query, top_n=6):
                 search_text = row['search_text'].lower()
                 
                 # Direct category match in the product name gets highest priority
-                if category in product_name:
+                if category.lower() in product_name:
                     known_category_matches.append((row['display_name'], 1.0))
                     continue
                 
-                # Check if any related terms appear in the product name
+                # Check if any related terms appear in the product name with fuzzy matching
                 for related_term in related_products:
+                    # Direct match
                     if related_term.lower() in product_name:
                         known_category_matches.append((row['display_name'], 0.9))
+                        break
+                    
+                    # Fuzzy match for product names
+                    if fuzz.partial_ratio(related_term.lower(), product_name) > 85:
+                        known_category_matches.append((row['display_name'], 0.85))
                         break
                 
                 # If not found in product name, check entire search text
@@ -229,27 +300,66 @@ def find_similar_products(df, query, top_n=6):
                         if related_term.lower() in search_text:
                             known_category_matches.append((row['display_name'], 0.7))
                             break
+                        
+                        # Fuzzy match for search text
+                        if fuzz.partial_ratio(related_term.lower(), search_text) > 80:
+                            known_category_matches.append((row['display_name'], 0.65))
+                            break
     
     # Check for direct matches even if not in category mappings
-    # This handles specific product searches like "steel bar" that might not be in mappings
+    # This handles specific product searches with fuzzy matching
     if product_term and not known_category_matches:
         for i, row in df.iterrows():
             product_name = row['display_name'].lower()
             search_text = row['search_text'].lower()
             
             # Exact match in product name
-            if product_term in product_name:
+            if product_term.lower() in product_name:
                 known_category_matches.append((row['display_name'], 0.95))
                 continue
-                
-            # Check for all words appearing in product name
-            if all(word in product_name for word in product_term_words):
+            
+            # Fuzzy match for whole product term
+            if fuzz.partial_ratio(product_term.lower(), product_name) > 80:
                 known_category_matches.append((row['display_name'], 0.9))
+                continue
+                
+            # Check for all words appearing in product name with fuzzy matching
+            all_words_match = True
+            for word in product_term_words:
+                # Check if any word in product name is similar to the query word
+                max_word_score = 0
+                for prod_word in product_name.split():
+                    word_score = fuzz.ratio(word.lower(), prod_word.lower())
+                    max_word_score = max(max_word_score, word_score)
+                
+                if max_word_score < 75:  # Word not found in product name with sufficient similarity
+                    all_words_match = False
+                    break
+            
+            if all_words_match:
+                known_category_matches.append((row['display_name'], 0.85))
                 continue
                 
             # Check for all words appearing in search text
             if all(word in search_text for word in product_term_words):
                 known_category_matches.append((row['display_name'], 0.8))
+                continue
+            
+            # Fuzzy match for words in search text
+            all_words_match_fuzzy = True
+            for word in product_term_words:
+                # Check if any word in search text is similar to the query word
+                max_word_score = 0
+                for search_word in search_text.split():
+                    word_score = fuzz.ratio(word.lower(), search_word.lower())
+                    max_word_score = max(max_word_score, word_score)
+                
+                if max_word_score < 70:  # Word not found in search text with sufficient similarity
+                    all_words_match_fuzzy = False
+                    break
+            
+            if all_words_match_fuzzy:
+                known_category_matches.append((row['display_name'], 0.75))
                 continue
     
     # If we have category or direct matches, sort by score and return top results
@@ -318,17 +428,20 @@ def find_similar_products(df, query, top_n=6):
             if len(results) >= top_n:
                 break
     
-    # If still no results, use substring matching as last resort
+    # If still no results, use fuzzy matching as last resort
     if not results:
-        for i, name in enumerate(product_names):
-            name_lower = name.lower()
-            # Check if any words from the clean query appear in the name
-            if any(word in name_lower for word in clean_query.split()):
-                if name not in seen_products:
-                    results.append((name, 0.4))
-                    seen_products.add(name)
-                    if len(results) >= top_n:
-                        break
+        fuzzy_results = []
+        for product_name in product_names:
+            # Calculate fuzzy match score
+            score = fuzz.token_sort_ratio(clean_query, product_name.lower())
+            if score > 60:  # Only consider reasonably good matches
+                if product_name not in seen_products:
+                    fuzzy_results.append((product_name, score / 100))  # Normalize score to 0-1 range
+                    seen_products.add(product_name)
+        
+        # Sort by score and return top matches
+        if fuzzy_results:
+            results = sorted(fuzzy_results, key=lambda x: x[1], reverse=True)[:top_n]
     
     return results
 
@@ -517,7 +630,7 @@ def generate_supplier_insights(supplier_data, all_suppliers_data):
     
     return insights
 
-# Set up the Streamlit app
+
 # Set up the Streamlit app
 def main():
     st.title("Catalog Recommendation Agent")
