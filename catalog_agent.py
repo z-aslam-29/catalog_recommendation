@@ -123,6 +123,9 @@ def find_similar_products(df, query, top_n=6):
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
     Enhanced to handle typos and spelling mistakes using fuzzy matching.
     """
+
+    query = query.strip()
+    
     # Define category mappings for common search terms
     category_mappings = {
         "stationery": ["pen", "pencil", "eraser", "notebook", "paper", "glue", "scissors", "marker", "highlighter", "stapler"],
