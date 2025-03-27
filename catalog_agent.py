@@ -123,6 +123,12 @@ def find_similar_products(df, query, top_n=6):
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
     Enhanced to handle typos and spelling mistakes using fuzzy matching.
     """
+    # Initialize all variables at the start
+    results = []
+    product_names = []
+    product_texts = []
+    known_category_matches = []
+    seen_products = set()
 
     query = query.strip()
     
@@ -140,10 +146,9 @@ def find_similar_products(df, query, top_n=6):
         "furniture": ["chair", "table", "desk", "sofa", "cabinet", "bookshelf"],
         "clothing": ["shirt", "pant", "dress", "jacket", "sweater", "coat"],
         'metal': ['bar', 'round', 'square', 'stainless', 'steel', 'aluminum', 'metal', 'mm', 'inch'],
-        'tool': ['wrench', 'screwdriver', 'caliper', 'tool', 'pneumatic', 'impact'],
+        'tool': ['wrench', 'inch','screwdriver', 'caliper', 'tool', 'pneumatic', 'impact'],
         'adhesive': ['glue', 'adhesive', 'paste', 'all purpose'],
-        'mechanical': ['belt', 'hose', 'assembly', 'hydraulic', 'v-belt'],
-        'bar': ['metal bar', 'steel bar', 'aluminum bar', 'round bar', 'square bar', 'mm']
+        'mechanical': ['belt', 'hose', 'assembly', 'hydraulic', 'v-belt']
     }
     
     # Add plural forms to category mappings
@@ -241,22 +246,22 @@ def find_similar_products(df, query, top_n=6):
     # Use the expanded query for processing
     clean_query = expanded_query
     
-    # Get unique product texts
+    # Get product names and texts
     product_texts = df['search_text'].tolist()
+    product_names = df['display_name'].tolist() if 'display_name' in df.columns else df['product_name'].tolist()
     
     # Create a combined product name field that uses service_name as fallback
-    df['display_name'] = df.apply(lambda row: 
-                                row['product_name'] if pd.notna(row['product_name']) 
-                                else 'Unknown', axis=1)
-    
-    known_category_matches = []
+    if 'display_name' not in df.columns:
+        df['display_name'] = df.apply(lambda row: 
+                                    row['product_name'] if pd.notna(row['product_name']) 
+                                    else 'Unknown', axis=1)
     
     # First check for exact phrase matches in product names
     query_lower = query.lower()
     for i, row in df.iterrows():
         product_name = row['display_name'].lower()
         if query_lower in product_name:
-            known_category_matches.append((row['display_name'], 1.0))  # Highest score for exact match
+            known_category_matches.append((row['display_name'], 1.0)) # Highest score for exact match
     
     # Then check for all words appearing in order (but not necessarily contiguous)
     if not known_category_matches:
@@ -462,26 +467,23 @@ def find_similar_products(df, query, top_n=6):
                 if len(results) >= top_n:
                     break
     
-    # If still no results, use fuzzy matching as last resort
+    # Final fallback to fuzzy matching if no results found
     if not results:
         fuzzy_results = []
         query_words = set(clean_query.lower().split())
         for product_name in product_names:
-            # Only consider products that contain all query words
-            product_lower = product_name.lower()
-            if all(word in product_lower for word in query_words):
-                # Calculate fuzzy match score
-                score = fuzz.token_sort_ratio(clean_query, product_lower)
-                if score > 70:  # Higher threshold for fuzzy matches
-                    if product_name not in seen_products:
+            if isinstance(product_name, str):  # Ensure it's a string
+                product_lower = product_name.lower()
+                if all(word in product_lower for word in query_words):
+                    score = fuzz.token_sort_ratio(clean_query, product_lower)
+                    if score > 70 and product_name not in seen_products:
                         fuzzy_results.append((product_name, score / 100))
                         seen_products.add(product_name)
         
-        # Sort by score and return top matches
         if fuzzy_results:
             results = sorted(fuzzy_results, key=lambda x: x[1], reverse=True)[:top_n]
     
-    return results
+    return results[:top_n] if results else []
 
 # Find and analyze suppliers
 def find_and_analyze_suppliers(df, product_name, top_n=5):
