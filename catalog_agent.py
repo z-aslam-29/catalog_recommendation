@@ -147,6 +147,7 @@ def find_similar_products(df, query, top_n=6):
         "clothing": ["shirt", "pant", "dress", "jacket", "sweater", "coat"],
         'metal': ['bar', 'round', 'square', 'stainless', 'steel', 'aluminum', 'metal', 'mm', 'inch'],
         'tool': ['wrench', 'inch','screwdriver', 'caliper', 'tool', 'pneumatic', 'impact'],
+        'wrench': ['wrench'],
         'adhesive': ['glue', 'adhesive', 'paste', 'all purpose'],
         'mechanical': ['belt', 'hose', 'assembly', 'hydraulic', 'v-belt']
     }
