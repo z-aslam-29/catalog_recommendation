@@ -267,7 +267,7 @@ def find_similar_products(df, query, top_n=6):
             product_info = {
                 'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                 'specifications.color': row.get('specifications.color', 'N/A'),
-                'delivery_terms': row.get('delivery_terms', 'N/A')
+                'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
             }
             known_category_matches.append((row['display_name'], 1.0, product_info)) # Highest score for exact match
     
@@ -293,7 +293,7 @@ def find_similar_products(df, query, top_n=6):
                     product_info = {
                         'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                         'specifications.color': row.get('specifications.color', 'N/A'),
-                        'delivery_terms': row.get('delivery_terms', 'N/A')
+                        'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                     }
                     known_category_matches.append((row['display_name'], 0.9, product_info))
     
@@ -332,7 +332,7 @@ def find_similar_products(df, query, top_n=6):
                     product_info = {
                         'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                         'specifications.color': row.get('specifications.color', 'N/A'),
-                        'delivery_terms': row.get('delivery_terms', 'N/A')
+                        'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                     }
                     known_category_matches.append((row['display_name'], 0.85, product_info))
                     continue
@@ -345,7 +345,7 @@ def find_similar_products(df, query, top_n=6):
                         product_info = {
                             'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                             'specifications.color': row.get('specifications.color', 'N/A'),
-                            'delivery_terms': row.get('delivery_terms', 'N/A')
+                            'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                         }
                         known_category_matches.append((row['display_name'], 0.8, product_info))
                         break
@@ -356,7 +356,7 @@ def find_similar_products(df, query, top_n=6):
                         product_info = {
                             'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                             'specifications.color': row.get('specifications.color', 'N/A'),
-                            'delivery_terms': row.get('delivery_terms', 'N/A')
+                            'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                         }
                         known_category_matches.append((row['display_name'], 0.75, product_info))
                         break
@@ -369,7 +369,7 @@ def find_similar_products(df, query, top_n=6):
                             product_info = {
                                 'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                                 'specifications.color': row.get('specifications.color', 'N/A'),
-                                'delivery_terms': row.get('delivery_terms', 'N/A')
+                                'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                             }
                             known_category_matches.append((row['display_name'], 0.7, product_info))
                             break
@@ -380,7 +380,7 @@ def find_similar_products(df, query, top_n=6):
                             product_info = {
                                 'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                                 'specifications.color': row.get('specifications.color', 'N/A'),
-                                'delivery_terms': row.get('delivery_terms', 'N/A')
+                                'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                             }
                             known_category_matches.append((row['display_name'], 0.65, product_info))
                             break
@@ -398,7 +398,7 @@ def find_similar_products(df, query, top_n=6):
                 product_info = {
                     'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                     'specifications.color': row.get('specifications.color', 'N/A'),
-                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                    'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                 }
                 known_category_matches.append((row['display_name'], 0.95, product_info))
                 continue
@@ -409,7 +409,7 @@ def find_similar_products(df, query, top_n=6):
                 product_info = {
                     'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                     'specifications.color': row.get('specifications.color', 'N/A'),
-                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                    'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                 }
                 known_category_matches.append((row['display_name'], 0.9, product_info))
                 continue
@@ -432,7 +432,7 @@ def find_similar_products(df, query, top_n=6):
                 product_info = {
                     'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                     'specifications.color': row.get('specifications.color', 'N/A'),
-                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                    'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                 }
                 known_category_matches.append((row['display_name'], 0.85, product_info))
                 continue
@@ -443,7 +443,7 @@ def find_similar_products(df, query, top_n=6):
                 product_info = {
                     'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                     'specifications.color': row.get('specifications.color', 'N/A'),
-                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                    'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                 }
                 known_category_matches.append((row['display_name'], 0.8, product_info))
                 continue
@@ -466,7 +466,7 @@ def find_similar_products(df, query, top_n=6):
                 product_info = {
                     'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                     'specifications.color': row.get('specifications.color', 'N/A'),
-                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                    'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                 }
                 known_category_matches.append((row['display_name'], 0.75, product_info))
                 continue
@@ -542,7 +542,7 @@ def find_similar_products(df, query, top_n=6):
                 product_info = {
                     'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                     'specifications.color': row.get('specifications.color', 'N/A'),
-                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                    'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                 }
                 
                 results.append((product_name, cosine_similarities[i], product_info))
@@ -566,7 +566,7 @@ def find_similar_products(df, query, top_n=6):
                         product_info = {
                             'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
                             'specifications.color': row.get('specifications.color', 'N/A'),
-                            'delivery_terms': row.get('delivery_terms', 'N/A')
+                            'specifications.dimensions': row.get('specifications.dimensions', 'N/A')
                         }
                         fuzzy_results.append((product_name, score / 100, product_info))
                         seen_products.add(product_name)
@@ -822,7 +822,7 @@ def main():
                         st.markdown(f"""
                         **Weight Type:** {product_info['specifications.weight.type']}  
                         **Color:** {product_info['specifications.color']}  
-                        **Delivery Terms:** {product_info['delivery_terms']}
+                        **Dimension:** {product_info['specifications.dimensions']}
                         """)
             
             # If a product is selected, show analysis (keep this part the same)
