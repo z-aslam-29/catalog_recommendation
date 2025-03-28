@@ -122,6 +122,7 @@ def find_similar_products(df, query, top_n=6):
     """
     Find products similar to the user's query using TF-IDF + Cosine Similarity.
     Enhanced to handle typos and spelling mistakes using fuzzy matching.
+    Returns list of tuples: (product_name, score, product_info_dict)
     """
     # Initialize all variables at the start
     results = []
@@ -145,7 +146,7 @@ def find_similar_products(df, query, top_n=6):
         "kitchen": ["cookware", "utensil", "knife", "pot", "pan", "blender", "mixer"],
         "furniture": ["chair", "table", "desk", "sofa", "cabinet", "bookshelf"],
         "clothing": ["shirt", "pant", "dress", "jacket", "sweater", "coat"],
-        'metal': ['bar', 'round', 'square', 'stainless', 'steel', 'aluminum', 'metal', 'mm', 'inch'],
+        'metal': ['stainless', 'steel', 'aluminum', 'metal', 'mm', 'inch'],
         'tool': ['wrench', 'inch','screwdriver', 'caliper', 'tool', 'pneumatic', 'impact'],
         'wrench': ['wrench'],
         'adhesive': ['glue', 'adhesive', 'paste', 'all purpose'],
@@ -262,7 +263,13 @@ def find_similar_products(df, query, top_n=6):
     for i, row in df.iterrows():
         product_name = row['display_name'].lower()
         if query_lower in product_name:
-            known_category_matches.append((row['display_name'], 1.0)) # Highest score for exact match
+            # Create product info dictionary
+            product_info = {
+                'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                'specifications.color': row.get('specifications.color', 'N/A'),
+                'delivery_terms': row.get('delivery_terms', 'N/A')
+            }
+            known_category_matches.append((row['display_name'], 1.0, product_info)) # Highest score for exact match
     
     # Then check for all words appearing in order (but not necessarily contiguous)
     if not known_category_matches:
@@ -282,7 +289,13 @@ def find_similar_products(df, query, top_n=6):
             if len(match_positions) == len(query_words):
                 # Check if words appear in order
                 if match_positions == sorted(match_positions):
-                    known_category_matches.append((row['display_name'], 0.9))
+                    # Create product info dictionary
+                    product_info = {
+                        'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                        'specifications.color': row.get('specifications.color', 'N/A'),
+                        'delivery_terms': row.get('delivery_terms', 'N/A')
+                    }
+                    known_category_matches.append((row['display_name'], 0.9, product_info))
     
     # Then handle direct category mapping for any product category
     product_term_words = product_term.split()
@@ -315,31 +328,61 @@ def find_similar_products(df, query, top_n=6):
                 
                 # Direct category match in the product name gets highest priority
                 if category.lower() in product_name:
-                    known_category_matches.append((row['display_name'], 0.85))
+                    # Create product info dictionary
+                    product_info = {
+                        'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                        'specifications.color': row.get('specifications.color', 'N/A'),
+                        'delivery_terms': row.get('delivery_terms', 'N/A')
+                    }
+                    known_category_matches.append((row['display_name'], 0.85, product_info))
                     continue
                 
                 # Check if any related terms appear in the product name with fuzzy matching
                 for related_term in related_products:
                     # Direct match
                     if related_term.lower() in product_name:
-                        known_category_matches.append((row['display_name'], 0.8))
+                        # Create product info dictionary
+                        product_info = {
+                            'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                            'specifications.color': row.get('specifications.color', 'N/A'),
+                            'delivery_terms': row.get('delivery_terms', 'N/A')
+                        }
+                        known_category_matches.append((row['display_name'], 0.8, product_info))
                         break
                     
                     # Fuzzy match for product names
                     if fuzz.partial_ratio(related_term.lower(), product_name) > 85:
-                        known_category_matches.append((row['display_name'], 0.75))
+                        # Create product info dictionary
+                        product_info = {
+                            'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                            'specifications.color': row.get('specifications.color', 'N/A'),
+                            'delivery_terms': row.get('delivery_terms', 'N/A')
+                        }
+                        known_category_matches.append((row['display_name'], 0.75, product_info))
                         break
                 
                 # If not found in product name, check entire search text
                 if not any(related_term.lower() in product_name for related_term in related_products):
                     for related_term in related_products:
                         if related_term.lower() in search_text:
-                            known_category_matches.append((row['display_name'], 0.7))
+                            # Create product info dictionary
+                            product_info = {
+                                'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                                'specifications.color': row.get('specifications.color', 'N/A'),
+                                'delivery_terms': row.get('delivery_terms', 'N/A')
+                            }
+                            known_category_matches.append((row['display_name'], 0.7, product_info))
                             break
                         
                         # Fuzzy match for search text
                         if fuzz.partial_ratio(related_term.lower(), search_text) > 80:
-                            known_category_matches.append((row['display_name'], 0.65))
+                            # Create product info dictionary
+                            product_info = {
+                                'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                                'specifications.color': row.get('specifications.color', 'N/A'),
+                                'delivery_terms': row.get('delivery_terms', 'N/A')
+                            }
+                            known_category_matches.append((row['display_name'], 0.65, product_info))
                             break
     
     # Check for direct matches even if not in category mappings
@@ -351,12 +394,24 @@ def find_similar_products(df, query, top_n=6):
             
             # Exact match in product name
             if product_term.lower() in product_name:
-                known_category_matches.append((row['display_name'], 0.95))
+                # Create product info dictionary
+                product_info = {
+                    'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                    'specifications.color': row.get('specifications.color', 'N/A'),
+                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                }
+                known_category_matches.append((row['display_name'], 0.95, product_info))
                 continue
             
             # Fuzzy match for whole product term
             if fuzz.partial_ratio(product_term.lower(), product_name) > 80:
-                known_category_matches.append((row['display_name'], 0.9))
+                # Create product info dictionary
+                product_info = {
+                    'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                    'specifications.color': row.get('specifications.color', 'N/A'),
+                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                }
+                known_category_matches.append((row['display_name'], 0.9, product_info))
                 continue
                 
             # Check for all words appearing in product name with fuzzy matching
@@ -373,12 +428,24 @@ def find_similar_products(df, query, top_n=6):
                     break
             
             if all_words_match:
-                known_category_matches.append((row['display_name'], 0.85))
+                # Create product info dictionary
+                product_info = {
+                    'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                    'specifications.color': row.get('specifications.color', 'N/A'),
+                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                }
+                known_category_matches.append((row['display_name'], 0.85, product_info))
                 continue
                 
             # Check for all words appearing in search text
             if all(word in search_text for word in product_term_words):
-                known_category_matches.append((row['display_name'], 0.8))
+                # Create product info dictionary
+                product_info = {
+                    'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                    'specifications.color': row.get('specifications.color', 'N/A'),
+                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                }
+                known_category_matches.append((row['display_name'], 0.8, product_info))
                 continue
             
             # Fuzzy match for words in search text
@@ -395,7 +462,13 @@ def find_similar_products(df, query, top_n=6):
                     break
             
             if all_words_match_fuzzy:
-                known_category_matches.append((row['display_name'], 0.75))
+                # Create product info dictionary
+                product_info = {
+                    'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                    'specifications.color': row.get('specifications.color', 'N/A'),
+                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                }
+                known_category_matches.append((row['display_name'], 0.75, product_info))
                 continue
     
     # If we have category or direct matches, sort by score and return top results
@@ -403,9 +476,9 @@ def find_similar_products(df, query, top_n=6):
         # Remove duplicates while preserving order
         unique_results = []
         seen_products = set()
-        for product, score in sorted(known_category_matches, key=lambda x: x[1], reverse=True):
+        for product, score, product_info in sorted(known_category_matches, key=lambda x: x[1], reverse=True):
             if product not in seen_products:
-                unique_results.append((product, score))
+                unique_results.append((product, score, product_info))
                 seen_products.add(product)
                 if len(unique_results) >= top_n:
                     break
@@ -450,7 +523,7 @@ def find_similar_products(df, query, top_n=6):
         # Get indices sorted by similarity score in descending order
         sorted_indices = np.argsort(cosine_similarities)[::-1]
         
-        # Create a list of tuples (product_name, similarity_score)
+        # Create a list of tuples (product_name, similarity_score, product_info)
         results = []
         seen_products = set()
         
@@ -462,7 +535,17 @@ def find_similar_products(df, query, top_n=6):
                 if product_name in seen_products:
                     continue
                 
-                results.append((product_name, cosine_similarities[i]))
+                # Get the row data for this product
+                row = filtered_df.iloc[i]
+                
+                # Create product info dictionary
+                product_info = {
+                    'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                    'specifications.color': row.get('specifications.color', 'N/A'),
+                    'delivery_terms': row.get('delivery_terms', 'N/A')
+                }
+                
+                results.append((product_name, cosine_similarities[i], product_info))
                 seen_products.add(product_name)
                 
                 if len(results) >= top_n:
@@ -472,13 +555,20 @@ def find_similar_products(df, query, top_n=6):
     if not results:
         fuzzy_results = []
         query_words = set(clean_query.lower().split())
-        for product_name in product_names:
+        for i, row in df.iterrows():
+            product_name = row['display_name']
             if isinstance(product_name, str):  # Ensure it's a string
                 product_lower = product_name.lower()
                 if all(word in product_lower for word in query_words):
                     score = fuzz.token_sort_ratio(clean_query, product_lower)
                     if score > 70 and product_name not in seen_products:
-                        fuzzy_results.append((product_name, score / 100))
+                        # Create product info dictionary
+                        product_info = {
+                            'specifications.weight.type': row.get('specifications.weight.type', 'N/A'),
+                            'specifications.color': row.get('specifications.color', 'N/A'),
+                            'delivery_terms': row.get('delivery_terms', 'N/A')
+                        }
+                        fuzzy_results.append((product_name, score / 100, product_info))
                         seen_products.add(product_name)
         
         if fuzzy_results:
@@ -673,6 +763,9 @@ def generate_supplier_insights(supplier_data, all_suppliers_data):
 
 
 # Set up the Streamlit app
+# ... (keep all the previous code the same until the main() function display section)
+
+# Set up the Streamlit app
 def main():
     st.title("Catalog Recommendation Agent")
     
@@ -708,15 +801,31 @@ def main():
         else:
             st.header(f"Products matching: '{search_query}'")
             
-            # Display matched products
+            # Display matched products in individual boxes
             st.subheader("Matching Products")
-            for i, (product, _) in enumerate(similar_products):
-                if st.button(f"{product}", key=f"product_button_{i}"):
-                    st.session_state.selected_product = product
-                    if 'selected_supplier' in st.session_state:
-                        del st.session_state.selected_supplier
+            cols = st.columns(3)  # Create 3 columns for the product boxes
             
-            # If a product is selected, show analysis
+            for i, (product, _, product_info) in enumerate(similar_products):
+                # Determine which column to use (0, 1, or 2)
+                col = cols[i % 3]
+                
+                with col:
+                    # Create a box/container for each product
+                    with st.container(border=True):  # Added border for visual separation
+                        # Display product name as a button
+                        if st.button(f"{product}", key=f"product_button_{i}"):
+                            st.session_state.selected_product = product
+                            if 'selected_supplier' in st.session_state:
+                                del st.session_state.selected_supplier
+                        
+                        # Display additional product info in a more compact format
+                        st.markdown(f"""
+                        **Weight Type:** {product_info['specifications.weight.type']}  
+                        **Color:** {product_info['specifications.color']}  
+                        **Delivery Terms:** {product_info['delivery_terms']}
+                        """)
+            
+            # If a product is selected, show analysis (keep this part the same)
             if 'selected_product' in st.session_state:
                 selected_product = st.session_state.selected_product
                 st.header(f"Analysis for: {selected_product}")
@@ -760,7 +869,6 @@ def main():
                     supplier_products = all_products[all_products['supplier_name'] == selected_supplier_name]
                     
                     # Display all columns for the selected supplier
-                    
                     columns_to_display=[
                         'supplier_name', 'supplier_id', 'product_name', 'parent_category', 'category', 
                         'description', 'catalog_id', 'unit_price', 'quantity', 'unit_of_measure', 'lead_time', 
